@@ -24,6 +24,7 @@ import (
 	"os"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -64,41 +65,20 @@ func main() {
 		fmt.Println(p.Name)
 	}
 
+	namespace, pod, container, procname, procid := parseEnv()
+	if procid != "" || procname != "" {
+		// TODO
+	}
+
 	// get process list
-	pod, container := parseEnv()
-	err = execCmd(clientset, config, pod, container, "ps", os.Stdin, os.Stdout, os.Stderr)
+	err = execCmd(clientset, config, namespace, pod, container, "ps", os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
+		fmt.Println("remotecommand failed")
 		panic(err.Error())
 	}
 
 	// block
 	<-(chan int)(nil)
-
-	// for {
-	// 	// get pods in all the namespaces by omitting namespace
-	// 	// Or specify namespace to get pods in particular namespace
-	// 	pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
-	// 	if err != nil {
-	// 		panic(err.Error())
-	// 	}
-	// 	fmt.Printf("There are %d pods in the cluster\n", len(pods.Items))
-
-	// 	// Examples for error handling:
-	// 	// - Use helper functions e.g. errors.IsNotFound()
-	// 	// - And/or cast to StatusError and use its properties like e.g. ErrStatus.Message
-	// 	_, err = clientset.CoreV1().Pods("default").Get(context.TODO(), "example-xxxxx", metav1.GetOptions{})
-	// 	if errors.IsNotFound(err) {
-	// 		fmt.Printf("Pod example-xxxxx not found in default namespace\n")
-	// 	} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
-	// 		fmt.Printf("Error getting pod %v\n", statusError.ErrStatus.Message)
-	// 	} else if err != nil {
-	// 		panic(err.Error())
-	// 	} else {
-	// 		fmt.Printf("Found example-xxxxx pod in default namespace\n")
-	// 	}
-
-	// 	time.Sleep(10 * time.Second)
-	// }
 }
 
 func parseArg() (pod, container string) {
@@ -110,12 +90,15 @@ func parseArg() (pod, container string) {
 	return
 }
 
-func parseEnv() (pod, container string) {
+func parseEnv() (namespace, pod, container, procname, procid string) {
+	namespace = os.Getenv("NAMESPACE")
 	pod = os.Getenv("POD_NAME")
 	container = os.Getenv("CONTAINER_NAME")
 	if pod == "" {
-		panic("invalid pod name")
+		panic("pod name cannot be empty")
 	}
+	procname = os.Getenv("PROC_NAME")
+	procid = os.Getenv("PROC_ID")
 	return
 }
 
@@ -123,8 +106,7 @@ func getProcessList(pod, container string) {
 
 }
 
-// func execCmd(client kubernetes.Interface, config *rest.Config, pod, container, command string,
-func execCmd(clientset *kubernetes.Clientset, config *rest.Config, pod, container, command string,
+func execCmd(clientset *kubernetes.Clientset, config *rest.Config, namespace, pod, container, command string,
 	stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	cmd := []string{
 		"sh",
@@ -132,8 +114,22 @@ func execCmd(clientset *kubernetes.Clientset, config *rest.Config, pod, containe
 		command,
 	}
 	req := clientset.CoreV1().RESTClient().Post().Resource("pods").Name(pod).
-		Namespace("default").SubResource("exec")
-	option := &v1.PodExecOptions{
+		Namespace(namespace).SubResource("exec")
+	var option *v1.PodExecOptions
+	if container == "" {
+		targetpod, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), pod, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			fmt.Printf("Pod %v not found in default namespace\n", pod)
+		} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
+			fmt.Printf("Error getting pod %v\n", statusError.ErrStatus.Message)
+		} else if err != nil {
+			panic(err.Error())
+		} else {
+			fmt.Printf("Found pod %v in default namespace\n", pod)
+		}
+		container = targetpod.Spec.Containers[0].Name
+	}
+	option = &v1.PodExecOptions{
 		Container: container,
 		Command:   cmd,
 		Stdin:     true,
@@ -141,6 +137,7 @@ func execCmd(clientset *kubernetes.Clientset, config *rest.Config, pod, containe
 		Stderr:    true,
 		TTY:       true,
 	}
+
 	if stdin == nil {
 		option.Stdin = false
 	}
@@ -151,10 +148,9 @@ func execCmd(clientset *kubernetes.Clientset, config *rest.Config, pod, containe
 	fmt.Printf("Getting process list of pod(%v)/container(%v)...\n", pod, container)
 	exec, err := remotecommand.NewSPDYExecutor(config, "POST", req.URL())
 	if err != nil {
-		fmt.Println("remotecommand failed")
-		fmt.Println(err.Error())
 		return err
 	}
+	fmt.Println("=====")
 	err = exec.Stream(remotecommand.StreamOptions{
 		Stdin:  stdin,
 		Stdout: stdout,
