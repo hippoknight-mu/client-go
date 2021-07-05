@@ -71,7 +71,7 @@ func main() {
 	}
 
 	// get process list
-	err = execCmd(clientset, config, namespace, pod, container, "ps", os.Stdin, os.Stdout, os.Stderr)
+	err = execCmd(clientset, config, namespace, pod, container, "ps", nil, os.Stdout, os.Stderr)
 	if err != nil {
 		fmt.Println("remotecommand failed")
 		panic(err.Error())
@@ -132,7 +132,7 @@ func execCmd(clientset *kubernetes.Clientset, config *rest.Config, namespace, po
 	option = &v1.PodExecOptions{
 		Container: container,
 		Command:   cmd,
-		Stdin:     true,
+		Stdin:     false,
 		Stdout:    true,
 		Stderr:    true,
 		TTY:       true,
@@ -151,10 +151,12 @@ func execCmd(clientset *kubernetes.Clientset, config *rest.Config, namespace, po
 		return err
 	}
 	fmt.Println("=====")
+
 	err = exec.Stream(remotecommand.StreamOptions{
-		Stdin:  stdin,
+		Stdin:  nil,
 		Stdout: stdout,
 		Stderr: stderr,
+		Tty:    true,
 	})
 	if err != nil {
 		return err
@@ -162,3 +164,44 @@ func execCmd(clientset *kubernetes.Clientset, config *rest.Config, namespace, po
 
 	return nil
 }
+
+type K8sExec struct { // https://zhimin-wen.medium.com/programing-exec-into-a-pod-5f2a70bd93bb
+	ClientSet     kubernetes.Interface
+	RestConfig    *rest.Config
+	PodName       string
+	ContainerName string
+	Namespace     string
+}
+
+// func (k8s *K8sExec) Exec(command []string) ([]byte, []byte, error) {
+// 	req := k8s.ClientSet.CoreV1().RESTClient().Post().
+// 		Resource("pods").
+// 		Name(k8s.PodName).
+// 		Namespace(k8s.Namespace).
+// 		SubResource("exec")
+// 	req.VersionedParams(&v1.PodExecOptions{
+// 		Container: k8s.ContainerName,
+// 		Command:   command,
+// 		Stdin:     false,
+// 		Stdout:    true,
+// 		Stderr:    true,
+// 		TTY:       true,
+// 	}, scheme.ParameterCodec)
+// 	log.Infof("Request URL: %s", req.URL().String())
+// 	exec, err := remotecommand.NewSPDYExecutor(k8s.RestConfig, "POST", req.URL())
+// 	if err != nil {
+// 		log.Errorf("Failed to exec:%v", err)
+// 		return []byte{}, []byte{}, err
+// 	}
+// 	var stdout, stderr bytes.Buffer
+// 	err = exec.Stream(remotecommand.StreamOptions{
+// 		Stdin:  nil,
+// 		Stdout: &stdout,
+// 		Stderr: &stderr,
+// 	})
+// 	if err != nil {
+// 		log.Errorf("Faile to get result:%v", err)
+// 		return []byte{}, []byte{}, err
+// 	}
+// 	return stdout.Bytes(), stderr.Bytes(), nil
+// }
