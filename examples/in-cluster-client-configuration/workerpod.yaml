@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: worker-pod
+  name: testworker
 spec:
   containers:
   - name: worker
@@ -10,7 +10,7 @@ spec:
     - name: POD_NAME
       value: "target-deployment-5cf5db59dd-j2jq5"
     - name: CONTAINER_NAME
-      value: ""
+      value: "busybox"
     - name: NAMESPACE
       valueFrom:
         fieldRef:
