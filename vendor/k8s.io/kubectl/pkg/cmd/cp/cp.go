@@ -248,7 +248,6 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 	reader, writer := io.Pipe()
 
 	// strip trailing slash (if any)
-	// why not `dest.File[len(dest.File)-1] == "/"`
 	if dest.File != "/" && strings.HasSuffix(string(dest.File[len(dest.File)-1]), "/") {
 		dest.File = dest.File[:len(dest.File)-1]
 	}
@@ -256,15 +255,11 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 	if err := o.checkDestinationIsDir(dest); err == nil {
 		// If no error, dest.File was found to be a directory.
 		// Copy specified src into it
-		fmt.Println("destination is dir##################")
 		dest.File = dest.File + "/" + path.Base(src.File)
-	} else {
-		fmt.Println("destination is file###################")
 	}
 
 	go func() {
 		defer writer.Close()
-		fmt.Println("make tar##################")
 		err := makeTar(src.File, dest.File, writer)
 		cmdutil.CheckErr(err)
 	}()
@@ -295,15 +290,6 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 
 	options.Command = cmdArr
 	options.Executor = &exec.DefaultRemoteExecutor{}
-	// ################# test tar pipe
-	// c2 := osexec.Command("tar", "xmf", "-", "-C", "/tmp")
-	// c2.Stdin = reader
-	// c2.Start()
-	// c2.Wait()
-	// fmt.Println("local tar created##################")
-
-	// #######################
-	fmt.Printf("%+v\n", options)
 	return o.execute(options)
 }
 

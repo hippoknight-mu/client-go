@@ -1,33 +1,17 @@
 package main
 
 import (
-	// "bytes"
-	// "io/ioutil"
-	// "net/http"
+	"bytes"
+	"fmt"
+	"os"
 
-	// v1 "k8s.io/api/core/v1"
-	// "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	// "k8s.io/client-go/kubernetes/scheme"
+	// dodok8s "github.com/dodopizza/kubectl-shovel/internal/kubernetes" nice sample
 	"k8s.io/kubectl/pkg/cmd/cp"
 )
 
 func (k8sExec *K8sExec) TestCopyToPod() {
-	// tf := cmdtesting.NewTestFactory().WithNamespace("test")
-	// f :=
-	// ns := scheme.Codecs.WithoutConversion()
-	// codec := scheme.Codecs.LegacyCodec(scheme.Scheme.PrioritizedVersionsAllGroups()...)
-
-	// tf.ClientConfigVal = cmdtesting.DefaultClientConfig()
 	ioStreams, _, _, _ := genericclioptions.NewTestIOStreams()
-	// ioStreams := genericclioptions.N
-
-	// srcFile, err := ioutil.TempDir("", "test")
-	// if err != nil {
-	// 	t.Errorf("unexpected error: %v", err)
-	// 	t.FailNow()
-	// }
-	// // defer os.RemoveAll(srcFile)
 
 	opts := cp.NewCopyOptions(ioStreams)
 	opts.ClientConfig = k8sExec.RestConfig
@@ -35,9 +19,26 @@ func (k8sExec *K8sExec) TestCopyToPod() {
 	opts.Container = k8sExec.ContainerName
 	opts.Namespace = k8sExec.Namespace
 
-	// cmd := cp.NewCmdCp(tf, ioStreams)
-	// opts.Complete(tf, cmd)
-
 	src, dest := "/app", k8sExec.PodName+":/tmp/app"
-	opts.Run([]string{src, dest})
+	err := opts.Run([]string{src, dest})
+	checkErr(err, "cp failed")
+}
+
+func (k *K8sExec) TestDoDoCopy(from, to string) error {
+	to = buildPodPath(k.Namespace, k.PodName, to)
+
+	ioStreams := genericclioptions.IOStreams{
+		In:     &bytes.Buffer{},
+		Out:    &bytes.Buffer{},
+		ErrOut: os.Stdout,
+	}
+	opts := cp.NewCopyOptions(ioStreams)
+	opts.Clientset = k.ClientSet
+	opts.ClientConfig = k.RestConfig
+
+	return opts.Run([]string{from, to})
+}
+
+func buildPodPath(namespace, podName, podFilePath string) string {
+	return fmt.Sprintf("%s/%s:%s", namespace, podName, podFilePath)
 }

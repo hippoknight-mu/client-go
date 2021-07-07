@@ -26,6 +26,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -46,6 +47,16 @@ func main() {
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
 	checkErr(err, "")
+	config.GroupVersion = &schema.GroupVersion{Group: "", Version: "v1"} // this is required using kubectl/cp, don't know why not in exec
+	if config.APIPath == "" {
+		config.APIPath = "/api"
+	}
+	if config.NegotiatedSerializer == nil {
+		config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+	}
+	if len(config.UserAgent) == 0 {
+		config.UserAgent = rest.DefaultKubernetesUserAgent()
+	}
 
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
@@ -80,6 +91,8 @@ func main() {
 
 	// copy dump tool binary
 	k8sExec.TestCopyToPod()
+	// err = k8sExec.TestDoDoCopy("/app", "/tmp/app")
+	checkErr(err, "cp failed")
 	k8sExec.execCmd("ls -a /tmp", nil, os.Stdout, os.Stderr)
 
 	// block
