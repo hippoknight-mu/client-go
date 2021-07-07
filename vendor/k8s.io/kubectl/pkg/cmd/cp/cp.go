@@ -24,7 +24,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	osexec "os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -297,13 +296,14 @@ func (o *CopyOptions) copyToPod(src, dest fileSpec, options *exec.ExecOptions) e
 	options.Command = cmdArr
 	options.Executor = &exec.DefaultRemoteExecutor{}
 	// ################# test tar pipe
-	c2 := osexec.Command("tar", "xmf", "-", "-C", "/tmp")
-	c2.Stdin = reader
-	c2.Start()
-	c2.Wait()
-	fmt.Println("local tar created##################")
+	// c2 := osexec.Command("tar", "xmf", "-", "-C", "/tmp")
+	// c2.Stdin = reader
+	// c2.Start()
+	// c2.Wait()
+	// fmt.Println("local tar created##################")
 
 	// #######################
+	fmt.Printf("%+v\n", options)
 	return o.execute(options)
 }
 
