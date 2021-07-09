@@ -18,11 +18,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: dump-rolebinding
-  namespace: default
+  # namespace: default
 subjects:
 - kind: ServiceAccount
   name: default
-  namespace: default
+  namespace: crd-test
 roleRef:
   kind: ClusterRole #this must be Role or ClusterRole
   name: process-dumper

@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: windows-deployment
+  labels:
+    app: winapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: winapp
+  template:
+    metadata:
+      labels:
+        app: winapp
+    spec:
+      containers:
+      - name: winapp
+        image: ic3suzhouswat.azurecr.io/win-target:latest
+        # command: ["powershell.exe", "sleep", "99999"]
+        command: ["powershell.exe", "C:\\\\bin\\consoleapp0.exe"]
+      nodeSelector:
+        beta.kubernetes.io/os: windows

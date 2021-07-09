@@ -62,51 +62,72 @@ func main() {
 	clientset, err := kubernetes.NewForConfig(config)
 	checkErr(err, "")
 
-	k8sExec := &K8sExec{
+	opts := &ExecOptions{
 		ClientSet:  clientset,
 		RestConfig: config,
 	}
 
-	// get all pods
-	pods, err := clientset.CoreV1().Pods("default").List(context.TODO(), metav1.ListOptions{})
-	checkErr(err, "")
-
-	fmt.Println("Pods list:")
-	for _, p := range pods.Items {
-		fmt.Println(p.Name)
-	}
-	fmt.Printf("total pod number: %v\n\n", len(pods.Items))
-
 	namespace, pod, container, procname, procid := parseEnv()
+
+	opts.ContainerName = container
+	opts.PodName = pod
+	opts.Namespace = namespace
+
 	if procid != "" || procname != "" {
 		// TODO
 	}
 
-	k8sExec.PodName = pod
-	k8sExec.ContainerName = container
-	k8sExec.Namespace = namespace
+	// dump steps:
+	// 0. validate pod, detect os (sh or powershell)
+	// 1. output process list, `ps` or `Get-Process`
+	// 2. create dump, only support windows for now
 
-	// get process list
-	k8sExec.getProcessList()
+	// Step 0
+	err = opts.validatePod()
+	checkErr(err, "")
 
-	// copy dump tool binary
-	k8sExec.TestCopyToPod()
-	// err = k8sExec.TestDoDoCopy("/app", "/tmp/app")
-	checkErr(err, "cp failed")
-	k8sExec.execCmd("ls -a /tmp", nil, os.Stdout, os.Stderr)
+	// Step 1
+	err = opts.getProcessList()
+	checkErr(err, "")
+
+	// Step 2
+	if opts.PodOS == "windows" {
+		err = opts.watsonDump(procid)
+		checkErr(err, "")
+	}
 
 	// block
 	<-(chan int)(nil)
+
+	// // get all pods
+	// pods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
+	// checkErr(err, "")
+
+	// fmt.Println("Pods list:")
+	// for _, p := range pods.Items {
+	// 	fmt.Println(p.Name)
+	// }
+	// fmt.Printf("total pod number: %v\n\n", len(pods.Items))
+
+	// get process list
+	opts.getProcessList()
+
+	// copy dump tool binary
+	opts.TestCopyToPod()
+	// err = ExecOptions.TestDoDoCopy("/app", "/tmp/app")
+	checkErr(err, "cp failed")
+	// opts.execCmd(["ls -a /tmp"], nil, os.Stdout, os.Stderr)
+
 }
 
-func parseArg() (pod, container string) {
-	argsWithoutProg := os.Args[1:]
-	fmt.Println(len(argsWithoutProg))
-	for idx, arg := range argsWithoutProg {
-		fmt.Printf("arg-%v: %v\n", idx, arg)
-	}
-	return
-}
+// func parseArg() (pod, container string) {
+// 	argsWithoutProg := os.Args[1:]
+// 	fmt.Println(len(argsWithoutProg))
+// 	for idx, arg := range argsWithoutProg {
+// 		fmt.Printf("arg-%v: %v\n", idx, arg)
+// 	}
+// 	return
+// }
 
 func parseEnv() (namespace, pod, container, procname, procid string) {
 	namespace = os.Getenv("NAMESPACE")
@@ -120,48 +141,89 @@ func parseEnv() (namespace, pod, container, procname, procid string) {
 	return
 }
 
-func (k *K8sExec) getProcessList() {
-	fmt.Printf("Getting process list of pod(%v)/container(%v)...\n", k.PodName, k.ContainerName)
-	// if os linux
-	err := k.execCmd("ps", nil, os.Stdout, os.Stderr)
-	checkErr(err, "remotecommand failed")
-	fmt.Println("=====")
+func (k *ExecOptions) validatePod() error {
+	targetpod, err := k.ClientSet.CoreV1().Pods(k.Namespace).Get(context.TODO(), k.PodName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		fmt.Printf("Pod %v not found in Namespace %v\n", k.PodName, k.Namespace)
+	} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
+		fmt.Printf("Error getting Pod %v\n", statusError.ErrStatus.Message)
+	} else if err != nil {
+		panic(err.Error())
+	} else {
+		fmt.Printf("Found pod %v in Namespace %v\n", k.PodName, k.Namespace)
+	}
+	if k.ContainerName == "" {
+		k.ContainerName = targetpod.Spec.Containers[0].Name
+	} else {
+		// TODO, validate given container exists in pod
+	}
+
+	fmt.Printf("%+v\n\n", targetpod.Spec)
+
+	var found bool
+	// get OS
+	if k.PodOS, found = targetpod.Spec.NodeSelector["beta.kubernetes.io/os"]; !found {
+		if k.PodOS, found = targetpod.Spec.NodeSelector["kubernetes.io/os"]; !found {
+			fmt.Printf("found no nodeSelector in targetpod(%v), assume is linux\n", k.PodName)
+			k.PodOS = "linux"
+			return nil
+		}
+	}
+	fmt.Println("Pod OS is " + k.PodOS)
+	return nil
 }
 
-func (k *K8sExec) execCmd(command string,
-	stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-	cmd := []string{
-		"sh",
-		"-c",
-		command,
+func (k *ExecOptions) getProcessList() (err error) {
+	fmt.Printf("Getting process list of pod(%v)/container(%v)...\n", k.PodName, k.ContainerName)
+	if k.PodOS == "linux" {
+		cmd := []string{
+			"sh",
+			"-c",
+			"ps",
+		}
+		err = k.execCmd(cmd, nil, os.Stdout, os.Stderr)
+	} else {
+		cmd := []string{
+			"powershell.exe",
+			"Get-Process",
+		}
+		err = k.execCmd(cmd, nil, os.Stdout, os.Stderr)
 	}
+	checkErr(err, "remotecommand failed")
+	fmt.Println("=====")
+	return err
+}
+
+func (k *ExecOptions) watsonDump(procid string) error {
+	cmd := []string{
+		"powershell.exe",
+		"C:\\JitWatson\\start.cosmic.ps1",
+	}
+	err := k.execCmd(cmd, nil, os.Stdout, os.Stderr)
+	checkErr(err, "")
+
+	cmd = []string{
+		"powershell.exe",
+		"C:\\JitWatson\\Dump-CrashReportingProcess.ps1 -UniquePid 8524",
+	}
+	err = k.execCmd(cmd, nil, os.Stdout, os.Stderr)
+	checkErr(err, "")
+	return nil
+}
+
+func (k *ExecOptions) execCmd(cmd []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	// var option *v1.PodExecOptions
+
 	req := k.ClientSet.CoreV1().RESTClient().Post().Resource("pods").Name(k.PodName).
 		Namespace(k.Namespace).SubResource("exec")
-	var option *v1.PodExecOptions
-	if k.ContainerName == "" {
-		targetpod, err := k.ClientSet.CoreV1().Pods(k.Namespace).Get(context.TODO(), k.PodName, metav1.GetOptions{})
-		if errors.IsNotFound(err) {
-			fmt.Printf("Pod %v not found in default namespace\n", k.PodName)
-		} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
-			fmt.Printf("Error getting pod %v\n", statusError.ErrStatus.Message)
-		} else if err != nil {
-			panic(err.Error())
-		} else {
-			fmt.Printf("Found pod %v in default namespace\n", k.PodName)
-		}
-		k.ContainerName = targetpod.Spec.Containers[0].Name
-	}
-	option = &v1.PodExecOptions{
+
+	option := &v1.PodExecOptions{
 		Container: k.ContainerName,
 		Command:   cmd,
 		Stdin:     false,
 		Stdout:    true,
 		Stderr:    true,
 		TTY:       true,
-	}
-
-	if stdin == nil {
-		option.Stdin = false
 	}
 	req.VersionedParams(
 		option,
@@ -185,45 +247,16 @@ func (k *K8sExec) execCmd(command string,
 	return nil
 }
 
-// func cpFile(filename string) {
-// 	dir, err := ioutil.TempDir("", "input")
-// 	checkErr(err, "")
-// 	filepath := path.Join(dir, filename)
-
-// 	opt := &cp.CopyOptions{
-// 		IOStreams: genericclioptions.NewTestIOStreamsDiscard(),
-// 	}
-
-// 	src := cp.fileSpec{
-// 		File: src,
-// 	}
-// 	dest := cp.fileSpec{
-// 		PodNamespace: "pod-ns",
-// 		PodName:      "pod-name",
-// 		File:         dest,
-// 	}
-// 	err = opt.copyToPod(src, dest, &kexec.ExecOptions{})
-
-// 	// writer := &bytes.Buffer{}
-// 	// if err := makeTar(dir, dir, writer); err != nil {
-// 	// 	t.Fatalf("unexpected error: %v", err)
-// 	// }
-
-// 	// reader := bytes.NewBuffer(writer.Bytes())
-// 	// if err := opts.untarAll(fileSpec{}, reader, dir2, ""); err != nil {
-// 	// 	t.Fatalf("unexpected error: %v", err)
-// 	// }
-// }
-
-type K8sExec struct { // https://zhimin-wen.medium.com/programing-exec-into-a-pod-5f2a70bd93bb
+type ExecOptions struct { // https://zhimin-wen.medium.com/programing-exec-into-a-pod-5f2a70bd93bb
 	ClientSet     kubernetes.Interface
 	RestConfig    *rest.Config
 	PodName       string
 	ContainerName string
 	Namespace     string
+	PodOS         string
 }
 
-// func (k8s *K8sExec) Exec(command []string) ([]byte, []byte, error) {
+// func (k8s *ExecOptions) Exec(command []string) ([]byte, []byte, error) {
 // 	req := k8s.ClientSet.CoreV1().RESTClient().Post().
 // 		Resource("pods").
 // 		Name(k8s.PodName).

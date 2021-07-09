@@ -10,21 +10,21 @@ import (
 	"k8s.io/kubectl/pkg/cmd/cp"
 )
 
-func (k8sExec *K8sExec) TestCopyToPod() {
+func (k *ExecOptions) TestCopyToPod() {
 	ioStreams, _, _, _ := genericclioptions.NewTestIOStreams()
 
 	opts := cp.NewCopyOptions(ioStreams)
-	opts.ClientConfig = k8sExec.RestConfig
-	opts.Clientset = k8sExec.ClientSet
-	opts.Container = k8sExec.ContainerName
-	opts.Namespace = k8sExec.Namespace
+	opts.ClientConfig = k.RestConfig
+	opts.Clientset = k.ClientSet
+	opts.Container = k.ContainerName
+	opts.Namespace = k.Namespace
 
-	src, dest := "/app", k8sExec.PodName+":/tmp/app"
+	src, dest := "/app", k.PodName+":/tmp/app"
 	err := opts.Run([]string{src, dest})
 	checkErr(err, "cp failed")
 }
 
-func (k *K8sExec) TestDoDoCopy(from, to string) error {
+func (k *ExecOptions) TestDoDoCopy(from, to string) error {
 	to = buildPodPath(k.Namespace, k.PodName, to)
 
 	ioStreams := genericclioptions.IOStreams{
