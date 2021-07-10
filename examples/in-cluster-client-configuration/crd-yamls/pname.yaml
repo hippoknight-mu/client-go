@@ -1,0 +1,9 @@
+apiVersion: diagnostics.office.com/v1beta1
+kind: ProcessDump
+metadata:
+  name: dump-with-pname
+spec:
+  podName: windows-deployment-667c466f67-88h5s
+  processName: "consoleapp0"
+  containerName: ""
+

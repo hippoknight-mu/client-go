@@ -9,7 +9,7 @@ spec:
     env:
     - name: POD_NAME
       value: "windows-deployment-667c466f67-88h5s"
-    - name: PROC_NAME
+    - name: PROCESS_NAME
       value: "consoleapp0"
     - name: CONTAINER_NAME
       value: ""

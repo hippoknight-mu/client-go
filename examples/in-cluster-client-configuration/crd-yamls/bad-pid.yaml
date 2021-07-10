@@ -1,0 +1,10 @@
+apiVersion: diagnostics.office.com/v1beta1
+kind: ProcessDump
+metadata:
+  name: dump-wrong-pid
+spec:
+  podName: windows-deployment-667c466f67-88h5s
+  processName: ""
+  processID: -1123
+  containerName: ""
+

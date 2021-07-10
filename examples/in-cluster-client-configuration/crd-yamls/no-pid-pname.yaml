@@ -1,0 +1,11 @@
+apiVersion: diagnostics.office.com/v1beta1
+kind: ProcessDump
+metadata:
+  name: dump-without-pid-pname
+spec:
+  podName: windows-deployment-667c466f67-88h5s
+  processName: ""
+  # if not specifying an int value, it will be 0
+  # processID: 0 
+  containerName: ""
+

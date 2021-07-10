@@ -85,7 +85,7 @@ func main() {
 
 	// Step 2
 	if opts.PodOS == "windows" {
-		if opts.ProcID == "" && opts.ProcName == "" {
+		if opts.ProcID == "0" && opts.ProcName == "" {
 			fmt.Println("Please re-create a processdump resource and specify the process-id")
 			// block
 			<-(chan int)(nil)
@@ -101,18 +101,6 @@ func main() {
 
 	// block
 	<-(chan int)(nil)
-	// // get all pods
-	// pods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
-	// checkErr(err, "")
-
-	// fmt.Println("Pods list:")
-	// for _, p := range pods.Items {
-	// 	fmt.Println(p.Name)
-	// }
-	// fmt.Printf("total pod number: %v\n\n", len(pods.Items))
-
-	// err = ExecOptions.TestDoDoCopy("/app", "/tmp/app")
-	checkErr(err, "cp failed")
 }
 
 func (o *ExecOptions) parseEnv() {
@@ -122,52 +110,17 @@ func (o *ExecOptions) parseEnv() {
 		panic("pod name cannot be empty")
 	}
 	o.ContainerName = os.Getenv("CONTAINER_NAME")
-	o.ProcName = os.Getenv("PROC_NAME")
-	o.ProcID = os.Getenv("PROC_ID")
+	o.ProcName = os.Getenv("PROCESS_NAME")
+	o.ProcID = os.Getenv("PROCESS_ID")
 }
-
-// func (o *ExecOptions) getPIDbyProcName() {
-// 	/* sample output of `ps`
-// 	   PID   USER     TIME  COMMAND
-// 	       1 root      0:00 sleep infinity
-// 	     113 root      0:00 ps
-// 	*/
-// 	/* sample output of `Get-Process`
-// 	Handles  NPM(K)    PM(K)      WS(K)     CPU(s)     Id  SI ProcessName
-// 	-------  ------    -----      -----     ------     --  -- -----------
-// 	    123       6     1220       4904       0.06   3540   4 CExecSvc
-// 	     93       7     1188       4644       0.02   6300   4 conhost
-// 	     96       7     1280       4936       0.14   8700   4 conhost
-// 	    170      10     8572      63476       0.03   8524   4 consoleapp0
-// 	*/
-// 	if o.PodOS == "windows" {
-// 		// r, w, _ := os.Pipe()
-// 		var b bytes.Buffer
-// 		cmd := []string{
-// 			"powershell.exe",
-// 			fmt.Sprintf(`(Get-Process | Where-Object {$_.Name -eq "%s"} | Select -Index 0).Id`, o.ProcName),
-// 		}
-// 		o.execCmd(cmd, nil, &b, os.Stderr)
-// 		// w.Close()
-// 		// out, _ := ioutil.ReadAll(r)
-// 		out, _ := ioutil.ReadAll(&b)
-// 		// fmt.Println(out, string(out))
-// 		o.ProcID = strings.TrimSpace(string(out))
-// 		fmt.Println("======"+o.ProcID+"============")
-// 		fmt.Println([]byte(o.ProcID))
-// 		if o.ProcID == "" {
-// 			panic("target process not found")
-// 		} else {
-// 			fmt.Printf("Found PID(%s) by ProcessName(%s)\n", o.ProcID, o.ProcName)
-// 		}
-// 	}
-// }
 
 func (o *ExecOptions) validatePod() error {
 	// get pod
 	targetpod, err := o.ClientSet.CoreV1().Pods(o.Namespace).Get(context.TODO(), o.PodName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		fmt.Printf("Pod %v not found in Namespace %v\n", o.PodName, o.Namespace)
+		// block
+		<-(chan int)(nil)
 	} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
 		fmt.Printf("Error getting Pod %v\n", statusError.ErrStatus.Message)
 	} else if err != nil {
@@ -206,11 +159,14 @@ func (o *ExecOptions) getProcessList() (output string, err error) {
 		}
 		err = o.execCmd(cmd, nil, os.Stdout, os.Stderr)
 	} else {
+		var b bytes.Buffer
 		cmd := []string{
 			"powershell.exe",
 			"Get-Process",
 		}
-		err = o.execCmd(cmd, nil, os.Stdout, os.Stderr)
+		err = o.execCmd(cmd, nil, &b, os.Stderr)
+		fmt.Println(b.String())
+		fmt.Println()
 	}
 	checkErr(err, "remotecommand failed")
 	fmt.Println("")
@@ -225,7 +181,7 @@ func (o *ExecOptions) watsonDump() error {
 	// checkErr(err, "")
 
 	scriptparam := "C:\\run-dump.ps1 "
-	if (o.ProcID != "") {
+	if o.ProcID != "0" {
 		scriptparam += "-ProcID " + o.ProcID
 	} else {
 		scriptparam += "-ProcName " + o.ProcName
@@ -236,19 +192,30 @@ func (o *ExecOptions) watsonDump() error {
 	}
 
 	fmt.Println("Start dump ... ")
-	var null bytes.Buffer
-	err = o.execCmd(cmd, nil, &null, nil)
+	var weird bytes.Buffer
+	err = o.execCmd(cmd, nil, &weird, nil)
 	checkErr(err, "")
+	// fmt.Println()
+	// fmt.Println()
+	// fmt.Println()
+	// fmt.Println()
+	// fmt.Println()
+	// fmt.Println(weird.String())
+	// fmt.Println()
+	// fmt.Println()
+	// fmt.Println()
+	// fmt.Println()
+	// fmt.Println()
 	// time.Sleep(20 * time.Second)
 	var b bytes.Buffer
-	for i:=0; i<20; i++ {
+	for i := 0; i < 20; i++ {
 		cmd := []string{
-			"powershell.exe",	
+			"powershell.exe",
 			"cat log.txt",
 		}
 		o.execCmd(cmd, nil, &b, nil)
 		if b.Len() > 0 {
-			fmt.Println("============= Dump Uploaded ==============")
+			// fmt.Println("============= Dump Uploaded ==============")
 			fmt.Println(b.String())
 			return nil
 		} else {
@@ -276,7 +243,10 @@ func (o *ExecOptions) execCmd(cmd []string, stdin io.Reader, stdout io.Writer, s
 	)
 	// fmt.Printf("Executing cmd: %+v", cmd)
 	// fmt.Println()
+
+	// errorChan := remotecommand.watchErrorStream(stderr, &errorDecoderV2{})
 	exec, err := remotecommand.NewSPDYExecutor(o.RestConfig, "POST", req.URL())
+
 	if err != nil {
 		return err
 	}
@@ -294,6 +264,7 @@ func (o *ExecOptions) execCmd(cmd []string, stdin io.Reader, stdout io.Writer, s
 	fmt.Println()
 
 	return nil
+	// return <-errorChan
 }
 
 type ExecOptions struct {
