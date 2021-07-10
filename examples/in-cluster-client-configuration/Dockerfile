@@ -14,4 +14,6 @@
 
 FROM debian
 COPY ./app /app
+COPY ./run-dump.ps1 /run-dump.ps1
+COPY ./start.cosmic.ps1 /start.cosmic.ps1
 ENTRYPOINT /app

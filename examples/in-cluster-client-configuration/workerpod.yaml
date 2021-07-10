@@ -5,13 +5,17 @@ metadata:
 spec:
   containers:
   - name: worker
-    image: mqiaoacr.azurecr.io/sample-client:latest
+    image: ic3suzhouswat.azurecr.io/sample-client:latest
     env:
     - name: POD_NAME
-      value: "target-deployment-5cf5db59dd-j2jq5"
+      value: "windows-deployment-667c466f67-88h5s"
+    - name: PROC_NAME
+      value: "consoleapp0"
     - name: CONTAINER_NAME
-      value: "busybox"
+      value: ""
     - name: NAMESPACE
       valueFrom:
         fieldRef:
           fieldPath: metadata.namespace
+  nodeSelector:
+    kubernetes.io/os: "linux"

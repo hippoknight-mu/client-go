@@ -18,10 +18,12 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -47,7 +49,7 @@ func main() {
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
 	checkErr(err, "")
-	config.GroupVersion = &schema.GroupVersion{Group: "", Version: "v1"} // this is required using kubectl/cp, don't know why not in exec
+	config.GroupVersion = &schema.GroupVersion{Group: "", Version: "v1"} // this is required when using kubectl/cp, don't know why not in exec
 	if config.APIPath == "" {
 		config.APIPath = "/api"
 	}
@@ -67,15 +69,7 @@ func main() {
 		RestConfig: config,
 	}
 
-	namespace, pod, container, procname, procid := parseEnv()
-
-	opts.ContainerName = container
-	opts.PodName = pod
-	opts.Namespace = namespace
-
-	if procid != "" || procname != "" {
-		// TODO
-	}
+	opts.parseEnv()
 
 	// dump steps:
 	// 0. validate pod, detect os (sh or powershell)
@@ -87,18 +81,26 @@ func main() {
 	checkErr(err, "")
 
 	// Step 1
-	err = opts.getProcessList()
-	checkErr(err, "")
+	opts.getProcessList()
 
 	// Step 2
 	if opts.PodOS == "windows" {
-		err = opts.watsonDump(procid)
-		checkErr(err, "")
+		if opts.ProcID == "" && opts.ProcName == "" {
+			fmt.Println("Please re-create a processdump resource and specify the process-id")
+			// block
+			<-(chan int)(nil)
+		} else {
+			opts.watsonDump()
+		}
+	} else {
+		// TODO, linux dump
+		fmt.Println("Dump in linux container not supported yet.")
 	}
+
+	fmt.Println("WorkerPod finished.")
 
 	// block
 	<-(chan int)(nil)
-
 	// // get all pods
 	// pods, err := clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{})
 	// checkErr(err, "")
@@ -109,116 +111,159 @@ func main() {
 	// }
 	// fmt.Printf("total pod number: %v\n\n", len(pods.Items))
 
-	// get process list
-	opts.getProcessList()
-
-	// copy dump tool binary
-	opts.TestCopyToPod()
 	// err = ExecOptions.TestDoDoCopy("/app", "/tmp/app")
 	checkErr(err, "cp failed")
-	// opts.execCmd(["ls -a /tmp"], nil, os.Stdout, os.Stderr)
-
 }
 
-// func parseArg() (pod, container string) {
-// 	argsWithoutProg := os.Args[1:]
-// 	fmt.Println(len(argsWithoutProg))
-// 	for idx, arg := range argsWithoutProg {
-// 		fmt.Printf("arg-%v: %v\n", idx, arg)
-// 	}
-// 	return
-// }
-
-func parseEnv() (namespace, pod, container, procname, procid string) {
-	namespace = os.Getenv("NAMESPACE")
-	pod = os.Getenv("POD_NAME")
-	container = os.Getenv("CONTAINER_NAME")
-	if pod == "" {
+func (o *ExecOptions) parseEnv() {
+	o.Namespace = os.Getenv("NAMESPACE")
+	o.PodName = os.Getenv("POD_NAME")
+	if o.PodName == "" {
 		panic("pod name cannot be empty")
 	}
-	procname = os.Getenv("PROC_NAME")
-	procid = os.Getenv("PROC_ID")
-	return
+	o.ContainerName = os.Getenv("CONTAINER_NAME")
+	o.ProcName = os.Getenv("PROC_NAME")
+	o.ProcID = os.Getenv("PROC_ID")
 }
 
-func (k *ExecOptions) validatePod() error {
-	targetpod, err := k.ClientSet.CoreV1().Pods(k.Namespace).Get(context.TODO(), k.PodName, metav1.GetOptions{})
+// func (o *ExecOptions) getPIDbyProcName() {
+// 	/* sample output of `ps`
+// 	   PID   USER     TIME  COMMAND
+// 	       1 root      0:00 sleep infinity
+// 	     113 root      0:00 ps
+// 	*/
+// 	/* sample output of `Get-Process`
+// 	Handles  NPM(K)    PM(K)      WS(K)     CPU(s)     Id  SI ProcessName
+// 	-------  ------    -----      -----     ------     --  -- -----------
+// 	    123       6     1220       4904       0.06   3540   4 CExecSvc
+// 	     93       7     1188       4644       0.02   6300   4 conhost
+// 	     96       7     1280       4936       0.14   8700   4 conhost
+// 	    170      10     8572      63476       0.03   8524   4 consoleapp0
+// 	*/
+// 	if o.PodOS == "windows" {
+// 		// r, w, _ := os.Pipe()
+// 		var b bytes.Buffer
+// 		cmd := []string{
+// 			"powershell.exe",
+// 			fmt.Sprintf(`(Get-Process | Where-Object {$_.Name -eq "%s"} | Select -Index 0).Id`, o.ProcName),
+// 		}
+// 		o.execCmd(cmd, nil, &b, os.Stderr)
+// 		// w.Close()
+// 		// out, _ := ioutil.ReadAll(r)
+// 		out, _ := ioutil.ReadAll(&b)
+// 		// fmt.Println(out, string(out))
+// 		o.ProcID = strings.TrimSpace(string(out))
+// 		fmt.Println("======"+o.ProcID+"============")
+// 		fmt.Println([]byte(o.ProcID))
+// 		if o.ProcID == "" {
+// 			panic("target process not found")
+// 		} else {
+// 			fmt.Printf("Found PID(%s) by ProcessName(%s)\n", o.ProcID, o.ProcName)
+// 		}
+// 	}
+// }
+
+func (o *ExecOptions) validatePod() error {
+	// get pod
+	targetpod, err := o.ClientSet.CoreV1().Pods(o.Namespace).Get(context.TODO(), o.PodName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
-		fmt.Printf("Pod %v not found in Namespace %v\n", k.PodName, k.Namespace)
+		fmt.Printf("Pod %v not found in Namespace %v\n", o.PodName, o.Namespace)
 	} else if statusError, isStatus := err.(*errors.StatusError); isStatus {
 		fmt.Printf("Error getting Pod %v\n", statusError.ErrStatus.Message)
 	} else if err != nil {
 		panic(err.Error())
 	} else {
-		fmt.Printf("Found pod %v in Namespace %v\n", k.PodName, k.Namespace)
+		fmt.Printf("Found pod %v in Namespace %v\n", o.PodName, o.Namespace)
 	}
-	if k.ContainerName == "" {
-		k.ContainerName = targetpod.Spec.Containers[0].Name
+	if o.ContainerName == "" {
+		o.ContainerName = targetpod.Spec.Containers[0].Name
 	} else {
 		// TODO, validate given container exists in pod
 	}
+	// fmt.Printf("%+v\n\n", targetpod.Spec)
 
-	fmt.Printf("%+v\n\n", targetpod.Spec)
-
-	var found bool
 	// get OS
-	if k.PodOS, found = targetpod.Spec.NodeSelector["beta.kubernetes.io/os"]; !found {
-		if k.PodOS, found = targetpod.Spec.NodeSelector["kubernetes.io/os"]; !found {
-			fmt.Printf("found no nodeSelector in targetpod(%v), assume is linux\n", k.PodName)
-			k.PodOS = "linux"
+	var found bool
+	if o.PodOS, found = targetpod.Spec.NodeSelector["beta.kubernetes.io/os"]; !found {
+		if o.PodOS, found = targetpod.Spec.NodeSelector["kubernetes.io/os"]; !found {
+			fmt.Printf("found no nodeSelector in targetpod(%v), assume is linux\n", o.PodName)
+			o.PodOS = "linux"
 			return nil
 		}
 	}
-	fmt.Println("Pod OS is " + k.PodOS)
+	fmt.Println("Pod OS: " + o.PodOS)
 	return nil
 }
 
-func (k *ExecOptions) getProcessList() (err error) {
-	fmt.Printf("Getting process list of pod(%v)/container(%v)...\n", k.PodName, k.ContainerName)
-	if k.PodOS == "linux" {
+func (o *ExecOptions) getProcessList() (output string, err error) {
+	fmt.Printf("Getting process list of pod(%v)/container(%v)...\n\n", o.PodName, o.ContainerName)
+
+	if o.PodOS == "linux" {
 		cmd := []string{
 			"sh",
 			"-c",
 			"ps",
 		}
-		err = k.execCmd(cmd, nil, os.Stdout, os.Stderr)
+		err = o.execCmd(cmd, nil, os.Stdout, os.Stderr)
 	} else {
 		cmd := []string{
 			"powershell.exe",
 			"Get-Process",
 		}
-		err = k.execCmd(cmd, nil, os.Stdout, os.Stderr)
+		err = o.execCmd(cmd, nil, os.Stdout, os.Stderr)
 	}
 	checkErr(err, "remotecommand failed")
-	fmt.Println("=====")
-	return err
+	fmt.Println("")
+
+	return output, err
 }
 
-func (k *ExecOptions) watsonDump(procid string) error {
+func (o *ExecOptions) watsonDump() error {
+	err := o.CopyToPod("/run-dump.ps1", "run-dump.ps1")
+	checkErr(err, "")
+	// err = o.CopyToPod("/start.cosmic.ps1", "JitWatson/start.cosmic.ps1")
+	// checkErr(err, "")
+
+	scriptparam := "C:\\run-dump.ps1 "
+	if (o.ProcID != "") {
+		scriptparam += "-ProcID " + o.ProcID
+	} else {
+		scriptparam += "-ProcName " + o.ProcName
+	}
 	cmd := []string{
 		"powershell.exe",
-		"C:\\JitWatson\\start.cosmic.ps1",
+		scriptparam,
 	}
-	err := k.execCmd(cmd, nil, os.Stdout, os.Stderr)
-	checkErr(err, "")
 
-	cmd = []string{
-		"powershell.exe",
-		"C:\\JitWatson\\Dump-CrashReportingProcess.ps1 -UniquePid 8524",
-	}
-	err = k.execCmd(cmd, nil, os.Stdout, os.Stderr)
+	fmt.Println("Start dump ... ")
+	var null bytes.Buffer
+	err = o.execCmd(cmd, nil, &null, nil)
 	checkErr(err, "")
-	return nil
+	// time.Sleep(20 * time.Second)
+	var b bytes.Buffer
+	for i:=0; i<20; i++ {
+		cmd := []string{
+			"powershell.exe",	
+			"cat log.txt",
+		}
+		o.execCmd(cmd, nil, &b, nil)
+		if b.Len() > 0 {
+			fmt.Println("============= Dump Uploaded ==============")
+			fmt.Println(b.String())
+			return nil
+		} else {
+			time.Sleep(2 * time.Second)
+		}
+	}
+	panic("Dump process failed.")
 }
 
-func (k *ExecOptions) execCmd(cmd []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
-	// var option *v1.PodExecOptions
-
-	req := k.ClientSet.CoreV1().RESTClient().Post().Resource("pods").Name(k.PodName).
-		Namespace(k.Namespace).SubResource("exec")
+func (o *ExecOptions) execCmd(cmd []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	req := o.ClientSet.CoreV1().RESTClient().Post().Resource("pods").Name(o.PodName).
+		Namespace(o.Namespace).SubResource("exec")
 
 	option := &v1.PodExecOptions{
-		Container: k.ContainerName,
+		Container: o.ContainerName,
 		Command:   cmd,
 		Stdin:     false,
 		Stdout:    true,
@@ -229,7 +274,9 @@ func (k *ExecOptions) execCmd(cmd []string, stdin io.Reader, stdout io.Writer, s
 		option,
 		scheme.ParameterCodec,
 	)
-	exec, err := remotecommand.NewSPDYExecutor(k.RestConfig, "POST", req.URL())
+	// fmt.Printf("Executing cmd: %+v", cmd)
+	// fmt.Println()
+	exec, err := remotecommand.NewSPDYExecutor(o.RestConfig, "POST", req.URL())
 	if err != nil {
 		return err
 	}
@@ -243,51 +290,22 @@ func (k *ExecOptions) execCmd(cmd []string, stdin io.Reader, stdout io.Writer, s
 	if err != nil {
 		return err
 	}
+	time.Sleep(1000 * time.Millisecond)
+	fmt.Println()
 
 	return nil
 }
 
-type ExecOptions struct { // https://zhimin-wen.medium.com/programing-exec-into-a-pod-5f2a70bd93bb
+type ExecOptions struct {
 	ClientSet     kubernetes.Interface
 	RestConfig    *rest.Config
 	PodName       string
 	ContainerName string
 	Namespace     string
 	PodOS         string
+	ProcName      string
+	ProcID        string
 }
-
-// func (k8s *ExecOptions) Exec(command []string) ([]byte, []byte, error) {
-// 	req := k8s.ClientSet.CoreV1().RESTClient().Post().
-// 		Resource("pods").
-// 		Name(k8s.PodName).
-// 		Namespace(k8s.Namespace).
-// 		SubResource("exec")
-// 	req.VersionedParams(&v1.PodExecOptions{
-// 		Container: k8s.ContainerName,
-// 		Command:   command,
-// 		Stdin:     false,
-// 		Stdout:    true,
-// 		Stderr:    true,
-// 		TTY:       true,
-// 	}, scheme.ParameterCodec)
-// 	log.Infof("Request URL: %s", req.URL().String())
-// 	exec, err := remotecommand.NewSPDYExecutor(k8s.RestConfig, "POST", req.URL())
-// 	if err != nil {
-// 		log.Errorf("Failed to exec:%v", err)
-// 		return []byte{}, []byte{}, err
-// 	}
-// 	var stdout, stderr bytes.Buffer
-// 	err = exec.Stream(remotecommand.StreamOptions{
-// 		Stdin:  nil,
-// 		Stdout: &stdout,
-// 		Stderr: &stderr,
-// 	})
-// 	if err != nil {
-// 		log.Errorf("Faile to get result:%v", err)
-// 		return []byte{}, []byte{}, err
-// 	}
-// 	return stdout.Bytes(), stderr.Bytes(), nil
-// }
 
 func checkErr(err error, msg string) {
 	if err != nil {
