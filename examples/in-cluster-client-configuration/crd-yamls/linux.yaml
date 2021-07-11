@@ -1,0 +1,7 @@
+apiVersion: diagnostics.office.com/v1beta1
+kind: ProcessDump
+metadata:
+  name: dump-linux-pod # a name you like, a workerpod with similar name will be created
+spec:
+  podName: linux-deployment-7dffd954d8-7xjwd # the pod where target process resides
+

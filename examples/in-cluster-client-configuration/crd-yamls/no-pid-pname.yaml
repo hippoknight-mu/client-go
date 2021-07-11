@@ -1,11 +1,7 @@
 apiVersion: diagnostics.office.com/v1beta1
 kind: ProcessDump
 metadata:
-  name: dump-without-pid-pname
+  name: dump-without-pid-pname # a name you like, a workerpod with similar name will be created
 spec:
-  podName: windows-deployment-667c466f67-88h5s
-  processName: ""
-  # if not specifying an int value, it will be 0
-  # processID: 0 
-  containerName: ""
+  podName: windows-deployment-667c466f67-88h5s # the pod where target process resides
 
